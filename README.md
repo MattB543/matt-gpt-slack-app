@@ -41,12 +41,18 @@ npm install
 Navigate to **OAuth & Permissions** and add these Bot Token Scopes:
 
 ```
-channels:history    # Read messages from public channels
-groups:history      # Read messages from private channels  
-im:history          # Read messages from DMs
-mpim:history        # Read messages from group DMs
-chat:write          # Send messages
+channels:read        # Read basic channel info
+channels:history     # Read messages from public channels
+groups:read          # Read basic private channel info (if using private channel)
+groups:history       # Read messages from private channels (if using private channel)
+im:read             # Read basic DM info (for redirect messages)
+im:history          # Read messages from DMs (for redirect messages)
+chat:write          # Send messages as the bot
+users:read          # Read user profile info
+channels:join       # Join public channels
 ```
+
+**Note**: The bot will redirect DM messages to your monitored channel rather than responding directly in DMs.
 
 #### Enable Event Subscriptions
 
@@ -54,10 +60,12 @@ chat:write          # Send messages
 2. Set Request URL to: `https://your-domain.com/slack/events`
 3. Add these Bot Events:
    - `message.channels`
-   - `message.groups` 
-   - `message.im`
-   - `message.mpim`
-   - `app_mention`
+   - `message.groups` (if using private channels)
+   - `message.im` (for redirect responses)
+
+4. Click **"Save Changes"**
+
+**Note**: The bot will only provide AI responses in the configured channel. If someone DMs the bot, it will politely redirect them to use the channel instead.
 
 #### Install to Workspace
 
@@ -115,14 +123,16 @@ npm start
 
 ### Basic Interaction
 
-1. **Invite the bot** to channels where you want it to respond:
+1. **Invite the bot** to your configured channel:
    ```
-   /invite @your-bot-name
+   /invite @matt-gpt
    ```
 
-2. **Send any message** in the monitored channel and the bot will respond with ChatGPT
+2. **Send any message** in the monitored channel and the bot will respond with Matt-GPT
 
 3. **Thread conversations** are automatically maintained - replies stay in the same thread
+
+4. **DM Handling**: If someone DMs the bot, it will politely redirect them to use the channel instead
 
 ### Example Interaction
 
@@ -210,6 +220,7 @@ matt-gpt-slack-app/
 ### Key Components
 
 - **Message Handler**: Filters and processes incoming messages with conversation tracking
+- **Bot Message Filtering**: Comprehensive detection and filtering of bot messages (bot_id, subtypes, bot_profile, Slackbot)
 - **Thread System**: Maintains conversation context using `thread_ts` and conversation IDs
 - **Matt-GPT Integration**: Calls Matt-GPT API with retry logic and context passing
 - **Conversation Tracking**: Stores and retrieves conversation IDs from Slack message metadata
@@ -290,6 +301,12 @@ Check the console logs for detailed error information.
 - Ensure bot is invited to the channel: `/invite @your-bot-name`
 - Check `SLACK_CHANNEL_ID` matches the channel you're testing in
 - Verify OAuth scopes include `channels:history` and `chat:write`
+- Make sure you're not testing with a bot account (bot will ignore all bot messages)
+
+**Bot responding to its own messages (infinite loop):**
+- This should not happen - the bot has comprehensive bot message filtering
+- Check server logs for bot detection messages: `"Ignoring message from bot: ..."`
+- Verify the bot's own messages have `bot_id` or `bot_profile` fields
 
 **"Missing scope" errors:**
 - Go to OAuth & Permissions in your Slack app

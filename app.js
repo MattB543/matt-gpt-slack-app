@@ -157,24 +157,76 @@ app.error(async ({ error, logger, context, body }) => {
   }
 });
 
+// Helper function to detect if channel is a DM
+function isDMChannel(channelId) {
+  return channelId.startsWith('D'); // Direct messages (1:1) start with 'D'
+}
+
+// Helper function to detect if channel is likely a group DM or private channel
+function isProbablyGroupDMOrPrivateChannel(channelId) {
+  return channelId.startsWith('G'); // Both group DMs and private channels start with 'G'
+}
+
 // Main message handler with channel filtering
 app.message(async ({ message, say, client, logger }) => {
-  // Filter by channel - only process messages from monitored channel
-  if (MONITORED_CHANNEL && message.channel !== MONITORED_CHANNEL) {
-    return;
-  }
-
-  // Skip bot messages and specific subtypes (except thread_broadcast)
-  if (message.subtype && message.subtype !== "thread_broadcast") {
-    return;
-  }
-
-  // Skip messages from bots (unless it's our own bot responding)
+  const { channel } = message;
+  
+  // Skip bot messages - comprehensive bot detection
+  // Method 1: Check for bot_id (most reliable for detecting bot messages)
   if (message.bot_id) {
+    logger.debug(`Ignoring message from bot: ${message.bot_id}`);
+    return;
+  }
+  
+  // Method 2: Check for specific subtypes that indicate automated messages
+  if (message.subtype) {
+    // Allow thread_broadcast (when user broadcasts thread reply to channel)
+    // Block all other subtypes which are typically automated/bot messages
+    if (message.subtype !== "thread_broadcast") {
+      logger.debug(`Ignoring message with subtype: ${message.subtype}`);
+      return;
+    }
+  }
+  
+  // Method 3: Additional check for bot_profile (backup detection)
+  if (message.bot_profile) {
+    logger.debug(`Ignoring message with bot_profile: ${message.bot_profile.name}`);
     return;
   }
 
-  const { text, user, ts, thread_ts, channel, reply_count, reply_users_count } = message;
+  // Method 4: Check for Slackbot specifically (user ID is typically USLACKBOT)
+  if (message.user === 'USLACKBOT') {
+    logger.debug(`Ignoring message from Slackbot`);
+    return;
+  }
+
+  // Handle DM messages - redirect to monitored channel
+  if (isDMChannel(channel)) {
+    if (MONITORED_CHANNEL) {
+      await say({
+        text: `👋 Hi there! I only respond to messages in <#${MONITORED_CHANNEL}>. Please write your message there and I'll respond in the thread!`,
+      });
+    } else {
+      await say({
+        text: `👋 Hi there! I only respond to messages in channels, not DMs. Please write your message in a channel where I'm present and I'll respond in the thread!`,
+      });
+    }
+    return;
+  }
+
+  // Handle Group DMs - also redirect (but allow private channels to pass through)
+  if (isProbablyGroupDMOrPrivateChannel(channel) && MONITORED_CHANNEL && channel !== MONITORED_CHANNEL) {
+    // For now, treat all 'G' channels the same - redirect if not the monitored channel
+    // Private channels will be allowed if they're the monitored channel
+    return; // Silently ignore group DMs and non-monitored private channels
+  }
+
+  // Filter by channel - only process messages from monitored channel
+  if (MONITORED_CHANNEL && channel !== MONITORED_CHANNEL) {
+    return;
+  }
+
+  const { text, user, ts, thread_ts, reply_count, reply_users_count } = message;
   
   // Detect message context for better thread handling
   const isInThread = Boolean(thread_ts);
