@@ -14,6 +14,7 @@ const app = new App({
 const MONITORED_CHANNEL = process.env.SLACK_CHANNEL_ID;
 const MATT_GPT_API_URL = process.env.MATT_GPT_API_URL || "http://localhost:8000";
 const MATT_GPT_BEARER_TOKEN = process.env.MATT_GPT_BEARER_TOKEN;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
 // Matt-GPT API integration with retry logic
 async function callMattGPTWithRetry(message, context = {}, maxRetries = 3, logger) {
@@ -23,9 +24,13 @@ async function callMattGPTWithRetry(message, context = {}, maxRetries = 3, logge
       
       const requestPayload = {
         message: message,
-        context: context,
-        model: "anthropic/claude-3.5-sonnet"
+        openrouter_api_key: OPENROUTER_API_KEY
       };
+      
+      // Add conversation_id for thread replies (continuing conversations)
+      if (context.conversation_id) {
+        requestPayload.conversation_id = context.conversation_id;
+      }
 
       const requestConfig = {
         headers: {
@@ -37,7 +42,10 @@ async function callMattGPTWithRetry(message, context = {}, maxRetries = 3, logge
 
       // Log the exact request being made
       logger.info(`📤 Request to ${MATT_GPT_API_URL}/chat:`, {
-        payload: JSON.stringify(requestPayload, null, 2),
+        payload: JSON.stringify({
+          ...requestPayload,
+          openrouter_api_key: OPENROUTER_API_KEY ? `${OPENROUTER_API_KEY.substring(0, 12)}...` : 'NOT_SET'
+        }, null, 2),
         headers: {
           'Authorization': `Bearer ${MATT_GPT_BEARER_TOKEN?.substring(0, 8)}...`,
           'Content-Type': requestConfig.headers['Content-Type']
@@ -204,6 +212,17 @@ function isProbablyGroupDMOrPrivateChannel(channelId) {
   return channelId.startsWith('G'); // Both group DMs and private channels start with 'G'
 }
 
+// Helper function to clean @mentions from message text
+function cleanMessageText(text) {
+  if (!text) return text;
+  
+  // Remove @mentions from the beginning of the message
+  // Pattern matches: <@U12345678> or <@U12345678|username>
+  const cleanedText = text.replace(/^<@[UW][A-Z0-9]+(?:\|[^>]+)?>\s*/g, '').trim();
+  
+  return cleanedText;
+}
+
 // Main message handler with channel filtering
 app.message(async ({ message, say, client, logger }) => {
   const { channel } = message;
@@ -352,10 +371,14 @@ app.event('app_mention', async ({ event, say, client, logger }) => {
 async function processMessageRequest(message, say, client, logger) {
   const { text, user, ts, thread_ts, channel } = message;
   
+  // Clean the message text (remove @mentions)
+  const cleanedText = cleanMessageText(text);
+  
   logger.info(`🚀 Starting message processing:`, {
     user,
     channel,
-    text: text?.substring(0, 100) + (text?.length > 100 ? '...' : ''),
+    originalText: text?.substring(0, 100) + (text?.length > 100 ? '...' : ''),
+    cleanedText: cleanedText?.substring(0, 100) + (cleanedText?.length > 100 ? '...' : ''),
     ts,
     thread_ts,
     messageType: thread_ts && thread_ts !== ts ? 'thread_reply' : 'new_message'
@@ -372,7 +395,18 @@ async function processMessageRequest(message, say, client, logger) {
       });
       return;
     }
+    
+    if (!OPENROUTER_API_KEY) {
+      logger.error(`❌ OPENROUTER_API_KEY not configured`);
+      await say({
+        text: "❌ OpenRouter API key is not configured. Please set OPENROUTER_API_KEY environment variable.",
+        thread_ts: thread_ts || ts,
+      });
+      return;
+    }
+    
     logger.info(`✅ Matt-GPT API configuration OK`);
+    logger.info(`✅ OpenRouter API key configured`);
 
     // Get or create conversation ID for this thread
     logger.info(`🔍 Getting conversation ID for thread...`);
@@ -441,7 +475,7 @@ async function processMessageRequest(message, say, client, logger) {
 
     // Call Matt-GPT with retry logic
     logger.info("🔄 Calling Matt-GPT API...");
-    const mattGPTResponse = await callMattGPTWithRetry(text, apiContext, 3, logger);
+    const mattGPTResponse = await callMattGPTWithRetry(cleanedText, apiContext, 3, logger);
     
     // Log response details
     logger.info("📥 Matt-GPT response received:", {
