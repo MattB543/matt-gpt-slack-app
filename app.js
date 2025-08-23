@@ -297,12 +297,19 @@ app.message(async ({ message, say, client, logger }) => {
   });
   
   // Check if this message should trigger a response
-  // Rule 1: If it's a thread reply in an existing conversation, always respond
-  // Rule 2: If it's a new message, only respond if the bot is mentioned
+  // Rule 1: If it contains @mention, let app_mention handler process it (avoid duplicates)
+  // Rule 2: If it's a thread reply WITHOUT @mention in an existing conversation, respond
   let shouldRespond = false;
   
-  if (isThreadReply) {
-    // This is a reply in an existing thread - check if we have a conversation going
+  // Check if message contains @mention to this bot
+  const containsMention = text && text.includes(`<@${process.env.SLACK_BOT_USER_ID || 'U09BR46BEV8'}>`);
+  
+  if (containsMention) {
+    // This message @mentions the bot - let app_mention handler process it
+    shouldRespond = false;
+    logger.debug(`Message contains @mention - letting app_mention handler process it`);
+  } else if (isThreadReply) {
+    // This is a thread reply WITHOUT @mention - check if we have a conversation going
     try {
       const threadHistory = await client.conversations.replies({
         channel: channel,
@@ -320,10 +327,9 @@ app.message(async ({ message, say, client, logger }) => {
       logger.warn("Could not check thread history for bot messages:", error.message);
     }
   } else {
-    // This is a new message or parent message - DON'T handle mentions here
-    // Mentions are handled by the app.event('app_mention') handler to avoid duplicates
+    // This is a new message without @mention - ignore
     shouldRespond = false;
-    logger.debug(`New message ignored - mentions handled by app_mention event`);
+    logger.debug(`New message without mention - ignored`);
   }
   
   // If we shouldn't respond, ignore the message
@@ -373,6 +379,18 @@ async function processMessageRequest(message, say, client, logger) {
   
   // Clean the message text (remove @mentions)
   const cleanedText = cleanMessageText(text);
+  
+  // Check for "side note" variations - skip processing if message starts with any of these
+  if (cleanedText) {
+    const lowerText = cleanedText.toLowerCase();
+    if (lowerText.startsWith('side note') || lowerText.startsWith('sidenote') || lowerText.startsWith('side-note')) {
+      logger.info(`💭 Skipping message - starts with side note variation:`, {
+        user,
+        text: cleanedText?.substring(0, 100) + (cleanedText?.length > 100 ? '...' : '')
+      });
+      return;
+    }
+  }
   
   logger.info(`🚀 Starting message processing:`, {
     user,
