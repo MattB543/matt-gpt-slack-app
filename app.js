@@ -383,7 +383,12 @@ async function processMessageRequest(message, say, client, logger) {
   // Check for "side note" variations - skip processing if message starts with any of these
   if (cleanedText) {
     const lowerText = cleanedText.toLowerCase();
-    if (lowerText.startsWith('side note') || lowerText.startsWith('sidenote') || lowerText.startsWith('side-note')) {
+    if (lowerText.startsWith('side note') || 
+        lowerText.startsWith('sidenote') || 
+        lowerText.startsWith('side-note') ||
+        lowerText.startsWith('*side note') ||
+        lowerText.startsWith('*sidenote') ||
+        lowerText.startsWith('*side-note')) {
       logger.info(`💭 Skipping message - starts with side note variation:`, {
         user,
         text: cleanedText?.substring(0, 100) + (cleanedText?.length > 100 ? '...' : '')
