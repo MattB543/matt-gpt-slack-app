@@ -19,27 +19,64 @@ const MATT_GPT_BEARER_TOKEN = process.env.MATT_GPT_BEARER_TOKEN;
 async function callMattGPTWithRetry(message, context = {}, maxRetries = 3, logger) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      logger.info(`Matt-GPT API attempt ${attempt}/${maxRetries}`);
+      logger.info(`🔄 Matt-GPT API attempt ${attempt}/${maxRetries}`);
+      
+      const requestPayload = {
+        message: message,
+        context: context,
+        model: "anthropic/claude-3.5-sonnet"
+      };
+
+      const requestConfig = {
+        headers: {
+          Authorization: `Bearer ${MATT_GPT_BEARER_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 30000, // 30 second timeout for Matt-GPT
+      };
+
+      // Log the exact request being made
+      logger.info(`📤 Request to ${MATT_GPT_API_URL}/chat:`, {
+        payload: JSON.stringify(requestPayload, null, 2),
+        headers: {
+          'Authorization': `Bearer ${MATT_GPT_BEARER_TOKEN?.substring(0, 8)}...`,
+          'Content-Type': requestConfig.headers['Content-Type']
+        }
+      });
       
       const response = await axios.post(
         `${MATT_GPT_API_URL}/chat`,
-        {
-          message: message,
-          context: context,
-          model: "anthropic/claude-3.5-sonnet"
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${MATT_GPT_BEARER_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          timeout: 30000, // 30 second timeout for Matt-GPT
-        }
+        requestPayload,
+        requestConfig
       );
+
+      logger.info(`📥 Matt-GPT API success:`, {
+        status: response.status,
+        data: response.data
+      });
 
       return response.data;
     } catch (error) {
-      logger.warn(`Matt-GPT attempt ${attempt} failed:`, error.message);
+      // Log detailed error information
+      if (error.response) {
+        logger.error(`❌ Matt-GPT API Error (attempt ${attempt}):`, {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data,
+          headers: error.response.headers
+        });
+      } else if (error.request) {
+        logger.error(`❌ Matt-GPT Network Error (attempt ${attempt}):`, {
+          message: error.message,
+          code: error.code,
+          url: error.config?.url
+        });
+      } else {
+        logger.error(`❌ Matt-GPT Unknown Error (attempt ${attempt}):`, {
+          message: error.message,
+          stack: error.stack
+        });
+      }
 
       if (attempt === maxRetries) {
         throw new Error(`Matt-GPT API failed after ${maxRetries} attempts: ${error.message}`);
@@ -47,7 +84,7 @@ async function callMattGPTWithRetry(message, context = {}, maxRetries = 3, logge
 
       // Exponential backoff: 2^attempt seconds
       const delay = Math.pow(2, attempt) * 1000;
-      logger.info(`Retrying in ${delay}ms...`);
+      logger.info(`⏳ Retrying in ${delay}ms...`);
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
@@ -264,12 +301,10 @@ app.message(async ({ message, say, client, logger }) => {
       logger.warn("Could not check thread history for bot messages:", error.message);
     }
   } else {
-    // This is a new message or parent message - check for bot mention
-    if (text && text.includes('<@U') && text.includes('>')) {
-      // Message contains a user mention - likely the bot
-      shouldRespond = true;
-      logger.info(`Responding to mention in new message`);
-    }
+    // This is a new message or parent message - DON'T handle mentions here
+    // Mentions are handled by the app.event('app_mention') handler to avoid duplicates
+    shouldRespond = false;
+    logger.debug(`New message ignored - mentions handled by app_mention event`);
   }
   
   // If we shouldn't respond, ignore the message
@@ -286,12 +321,15 @@ app.message(async ({ message, say, client, logger }) => {
 app.event('app_mention', async ({ event, say, client, logger }) => {
   const { channel, user, text, ts, thread_ts } = event;
   
+  logger.info(`🔔 App mentioned by ${user} in ${channel}: ${text}`);
+  
   // Only respond if in monitored channel (or no channel restriction)
   if (MONITORED_CHANNEL && channel !== MONITORED_CHANNEL) {
+    logger.info(`❌ Ignoring mention - not in monitored channel. Expected: ${MONITORED_CHANNEL}, Got: ${channel}`);
     return;
   }
   
-  logger.info(`App mentioned by ${user} in ${channel}: ${text}`);
+  logger.info(`✅ Processing mention in correct channel`);
   
   // Process this as a regular message by calling the same logic
   // Create a mock message object to reuse our existing logic
@@ -304,6 +342,8 @@ app.event('app_mention', async ({ event, say, client, logger }) => {
     type: 'message'
   };
   
+  logger.info(`📨 Created mock message object for processing:`, mockMessage);
+  
   // Call the same processing logic
   await processMessageRequest(mockMessage, say, client, logger);
 });
@@ -312,88 +352,128 @@ app.event('app_mention', async ({ event, say, client, logger }) => {
 async function processMessageRequest(message, say, client, logger) {
   const { text, user, ts, thread_ts, channel } = message;
   
+  logger.info(`🚀 Starting message processing:`, {
+    user,
+    channel,
+    text: text?.substring(0, 100) + (text?.length > 100 ? '...' : ''),
+    ts,
+    thread_ts,
+    messageType: thread_ts && thread_ts !== ts ? 'thread_reply' : 'new_message'
+  });
+  
   try {
     // Check if Matt-GPT API is configured
+    logger.info(`🔧 Checking Matt-GPT API configuration...`);
     if (!MATT_GPT_BEARER_TOKEN) {
+      logger.error(`❌ MATT_GPT_BEARER_TOKEN not configured`);
       await say({
         text: "❌ Matt-GPT API is not configured. Please set MATT_GPT_BEARER_TOKEN environment variable.",
         thread_ts: thread_ts || ts,
       });
       return;
     }
+    logger.info(`✅ Matt-GPT API configuration OK`);
 
     // Get or create conversation ID for this thread
+    logger.info(`🔍 Getting conversation ID for thread...`);
     let conversationId = null;
     
     // If this is a thread reply, try to get conversation ID from parent or previous messages
     if (thread_ts && thread_ts !== ts) {
+      logger.info(`📜 This is a thread reply - searching for existing conversation ID`);
       try {
         // Get the thread history to find conversation ID
+        logger.info(`🔍 Fetching thread history for thread_ts: ${thread_ts}`);
         const threadHistory = await client.conversations.replies({
           channel: channel,
           ts: thread_ts,
           limit: 50  // Get recent messages to find conversation ID
         });
         
+        logger.info(`📝 Thread history retrieved: ${threadHistory.messages.length} messages`);
+        
         // Look through messages for existing conversation ID
         for (const msg of threadHistory.messages.reverse()) {
           if (msg.bot_id) { // Only check bot messages
+            logger.info(`🤖 Checking bot message for conversation ID...`);
             const existingConvId = extractConversationId(msg);
             if (existingConvId) {
               conversationId = existingConvId;
-              logger.info(`Found existing conversation ID: ${conversationId}`);
+              logger.info(`✅ Found existing conversation ID: ${conversationId}`);
               break;
             }
           }
         }
+        
+        if (!conversationId) {
+          logger.info(`🔍 No existing conversation ID found in thread history`);
+        }
       } catch (error) {
-        logger.warn("Could not retrieve thread history:", error.message);
+        logger.error("❌ Could not retrieve thread history:", error.message);
       }
+    } else {
+      logger.info(`💬 This is a new message - no thread history to check`);
     }
     
     // Generate new conversation ID if none found
     if (!conversationId) {
       conversationId = uuidv4();
-      logger.info(`Created new conversation ID: ${conversationId}`);
+      logger.info(`✨ Created new conversation ID: ${conversationId}`);
     }
 
     // Show thinking indicator
+    logger.info(`💭 Posting thinking indicator...`);
     const thinkingMsg = await say({
       text: "🤔 Thinking...",
       thread_ts: thread_ts || ts,
     });
+    logger.info(`✅ Thinking message posted with ts: ${thinkingMsg.ts}`);
 
     // Build context for Matt-GPT API
+    logger.info(`📋 Building API context...`);
     const apiContext = {
       conversation_id: conversationId,
       thread_ts: thread_ts || ts,
       channel: channel,
       user_id: user
     };
+    logger.info(`📋 API context built:`, apiContext);
 
     // Call Matt-GPT with retry logic
-    logger.info("Calling Matt-GPT API...");
+    logger.info("🔄 Calling Matt-GPT API...");
     const mattGPTResponse = await callMattGPTWithRetry(text, apiContext, 3, logger);
     
     // Log response details
-    logger.info("Matt-GPT response received:", {
+    logger.info("📥 Matt-GPT response received:", {
       query_id: mattGPTResponse.query_id,
       tokens_used: mattGPTResponse.tokens_used,
       latency_ms: mattGPTResponse.latency_ms,
-      context_items_used: mattGPTResponse.context_items_used
+      context_items_used: mattGPTResponse.context_items_used,
+      responseLength: mattGPTResponse.response?.length
     });
 
     // Update thinking message with response, including conversation ID in metadata
+    logger.info(`🔄 Updating thinking message with response...`);
     const responsePayload = createMessageWithConversationId(
       mattGPTResponse.response,
       conversationId,
       thread_ts || ts
     );
+    logger.info(`📝 Response payload created:`, {
+      text: responsePayload.text?.substring(0, 100) + '...',
+      thread_ts: responsePayload.thread_ts,
+      blocks: responsePayload.blocks?.length ? `${responsePayload.blocks.length} blocks` : 'no blocks'
+    });
     
-    await client.chat.update({
+    const updateResult = await client.chat.update({
       channel: channel,
       ts: thinkingMsg.ts,
       ...responsePayload
+    });
+    
+    logger.info(`✅ Message updated successfully:`, {
+      ok: updateResult.ok,
+      ts: updateResult.ts
     });
 
   } catch (error) {
@@ -469,7 +549,7 @@ function validateConfiguration() {
     console.log(`🤖 Matt-GPT integration: ${MATT_GPT_BEARER_TOKEN ? '✅ Enabled' : '⚠️ Disabled (MATT_GPT_BEARER_TOKEN not set)'}`);
     console.log(`🔗 Matt-GPT API URL: ${MATT_GPT_API_URL}`);
     console.log(`🌐 Events API: Enabled (production mode)`);
-    console.log(`🔗 Webhook endpoint: https://your-domain.com/slack/events`);
+    console.log(`🔗 Webhook endpoint: https://matt-gpt-slack-app-w7oce.ondigitalocean.app/slack/events`);
     console.log("\n🎉 Bot is ready to receive messages!");
     
   } catch (error) {
