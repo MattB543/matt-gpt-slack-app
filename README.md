@@ -58,14 +58,16 @@ channels:join       # Join public channels
 
 1. Go to **Event Subscriptions** and toggle "Enable Events"
 2. Set Request URL to: `https://your-domain.com/slack/events`
+   ⚠️ **Important**: The path MUST be `/slack/events` (not `/slack`) - this is Slack Bolt's default endpoint
 3. Add these Bot Events:
-   - `message.channels`
-   - `message.groups` (if using private channels)
+   - `app_mention` (when bot is @mentioned)
+   - `message.channels` (for thread replies)
+   - `message.groups` (if using private channels, for thread replies)
    - `message.im` (for redirect responses)
 
 4. Click **"Save Changes"**
 
-**Note**: The bot will only provide AI responses in the configured channel. If someone DMs the bot, it will politely redirect them to use the channel instead.
+**Note**: The bot will only respond when **@mentioned** or when replying in existing conversation threads. If someone DMs the bot, it will politely redirect them to use the channel instead.
 
 #### Install to Workspace
 
@@ -128,16 +130,25 @@ npm start
    /invite @matt-gpt
    ```
 
-2. **Send any message** in the monitored channel and the bot will respond with Matt-GPT
+2. **Mention the bot** to start a conversation:
+   ```
+   @Matt-GPT Can you help me with JavaScript?
+   ```
 
-3. **Thread conversations** are automatically maintained - replies stay in the same thread
+3. **Continue in threads** - once a conversation starts, you can reply in the thread without @mentioning again
 
 4. **DM Handling**: If someone DMs the bot, it will politely redirect them to use the channel instead
+
+### Conversation Flow
+
+- **New conversations**: Must start with `@Matt-GPT` 
+- **Thread replies**: No @mention needed - bot responds to all replies in active threads
+- **Other messages**: Ignored (bot won't respond to every channel message)
 
 ### Example Interaction
 
 ```
-User: How do I center a div in CSS?
+User: @Matt-GPT How do I center a div in CSS?
 
 Bot: 🤔 Thinking...
       
@@ -162,7 +173,7 @@ Bot: To center a div in CSS, you can use several methods:
 
 This creates a clean, modern solution that works across all modern browsers.
 
-User: What about vertical centering only?
+User: What about vertical centering only? (replied in thread - no @mention needed)
 
 Bot: For vertical centering only, you can use:
 
@@ -318,6 +329,12 @@ Check the console logs for detailed error information.
 - Check `MATT_GPT_API_URL` points to the correct endpoint
 - Ensure the API is running and accessible
 - Verify your bearer token has proper permissions
+
+**"Your URL didn't respond with the value of the challenge parameter" error:**
+- Your Request URL must end with `/slack/events` (not `/slack`)
+- Ensure your server is running and publicly accessible
+- The correct URL format is: `https://your-domain.com/slack/events`
+- Slack Bolt automatically handles the challenge verification
 
 **Authentication errors:**
 - Verify bot token starts with `xoxb-`

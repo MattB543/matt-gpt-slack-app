@@ -240,6 +240,78 @@ app.message(async ({ message, say, client, logger }) => {
     replyCount: reply_count || 0
   });
   
+  // Check if this message should trigger a response
+  // Rule 1: If it's a thread reply in an existing conversation, always respond
+  // Rule 2: If it's a new message, only respond if the bot is mentioned
+  let shouldRespond = false;
+  
+  if (isThreadReply) {
+    // This is a reply in an existing thread - check if we have a conversation going
+    try {
+      const threadHistory = await client.conversations.replies({
+        channel: channel,
+        ts: thread_ts,
+        limit: 50
+      });
+      
+      // Look for any bot messages in this thread to determine if we're in a conversation
+      const hasBotMessages = threadHistory.messages.some(msg => msg.bot_id);
+      if (hasBotMessages) {
+        shouldRespond = true;
+        logger.info(`Responding to thread reply - existing conversation found`);
+      }
+    } catch (error) {
+      logger.warn("Could not check thread history for bot messages:", error.message);
+    }
+  } else {
+    // This is a new message or parent message - check for bot mention
+    if (text && text.includes('<@U') && text.includes('>')) {
+      // Message contains a user mention - likely the bot
+      shouldRespond = true;
+      logger.info(`Responding to mention in new message`);
+    }
+  }
+  
+  // If we shouldn't respond, ignore the message
+  if (!shouldRespond) {
+    logger.debug(`Ignoring message - no mention and not in active thread`);
+    return;
+  }
+  
+  // Use the extracted processing function
+  await processMessageRequest(message, say, client, logger);
+});
+
+// Handle app mentions specifically (when bot is @mentioned)
+app.event('app_mention', async ({ event, say, client, logger }) => {
+  const { channel, user, text, ts, thread_ts } = event;
+  
+  // Only respond if in monitored channel (or no channel restriction)
+  if (MONITORED_CHANNEL && channel !== MONITORED_CHANNEL) {
+    return;
+  }
+  
+  logger.info(`App mentioned by ${user} in ${channel}: ${text}`);
+  
+  // Process this as a regular message by calling the same logic
+  // Create a mock message object to reuse our existing logic
+  const mockMessage = {
+    channel,
+    user,
+    text,
+    ts,
+    thread_ts,
+    type: 'message'
+  };
+  
+  // Call the same processing logic
+  await processMessageRequest(mockMessage, say, client, logger);
+});
+
+// Extract the main message processing logic into a separate function
+async function processMessageRequest(message, say, client, logger) {
+  const { text, user, ts, thread_ts, channel } = message;
+  
   try {
     // Check if Matt-GPT API is configured
     if (!MATT_GPT_BEARER_TOKEN) {
@@ -349,7 +421,7 @@ app.message(async ({ message, say, client, logger }) => {
       logger.error("Error sending fallback message:", fallbackError);
     }
   }
-});
+}
 
 // Startup validation and safety checks
 function validateConfiguration() {
