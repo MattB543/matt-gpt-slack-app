@@ -408,11 +408,11 @@ async function processMessageRequest(message, say, client, logger) {
     logger.info(`✅ Matt-GPT API configuration OK`);
     logger.info(`✅ OpenRouter API key configured`);
 
-    // Get or create conversation ID for this thread
+    // Get conversation ID for this thread (only for thread replies)
     logger.info(`🔍 Getting conversation ID for thread...`);
     let conversationId = null;
     
-    // If this is a thread reply, try to get conversation ID from parent or previous messages
+    // If this is a thread reply, try to get conversation ID from previous bot messages
     if (thread_ts && thread_ts !== ts) {
       logger.info(`📜 This is a thread reply - searching for existing conversation ID`);
       try {
@@ -446,13 +446,7 @@ async function processMessageRequest(message, say, client, logger) {
         logger.error("❌ Could not retrieve thread history:", error.message);
       }
     } else {
-      logger.info(`💬 This is a new message - no thread history to check`);
-    }
-    
-    // Generate new conversation ID if none found
-    if (!conversationId) {
-      conversationId = uuidv4();
-      logger.info(`✨ Created new conversation ID: ${conversationId}`);
+      logger.info(`💬 This is a new message - will get conversation ID from API response`);
     }
 
     // Show thinking indicator
@@ -466,12 +460,18 @@ async function processMessageRequest(message, say, client, logger) {
     // Build context for Matt-GPT API
     logger.info(`📋 Building API context...`);
     const apiContext = {
-      conversation_id: conversationId,
       thread_ts: thread_ts || ts,
       channel: channel,
       user_id: user
     };
-    logger.info(`📋 API context built:`, apiContext);
+    
+    // Only include conversation_id for thread replies (continuing conversations)
+    if (conversationId) {
+      apiContext.conversation_id = conversationId;
+      logger.info(`📋 API context built with conversation ID:`, apiContext);
+    } else {
+      logger.info(`📋 API context built for new conversation:`, apiContext);
+    }
 
     // Call Matt-GPT with retry logic
     logger.info("🔄 Calling Matt-GPT API...");
@@ -483,14 +483,19 @@ async function processMessageRequest(message, say, client, logger) {
       tokens_used: mattGPTResponse.tokens_used,
       latency_ms: mattGPTResponse.latency_ms,
       context_items_used: mattGPTResponse.context_items_used,
-      responseLength: mattGPTResponse.response?.length
+      responseLength: mattGPTResponse.response?.length,
+      conversation_id: mattGPTResponse.conversation_id
     });
+
+    // Get conversation ID from API response (for new conversations)
+    const responseConversationId = mattGPTResponse.conversation_id || conversationId;
+    logger.info(`💾 Using conversation ID: ${responseConversationId} (from ${mattGPTResponse.conversation_id ? 'API response' : 'thread history'})`);
 
     // Update thinking message with response, including conversation ID in metadata
     logger.info(`🔄 Updating thinking message with response...`);
     const responsePayload = createMessageWithConversationId(
       mattGPTResponse.response,
-      conversationId,
+      responseConversationId,
       thread_ts || ts
     );
     logger.info(`📝 Response payload created:`, {
