@@ -1,0 +1,32 @@
+{
+  "name": "matt-gpt-slack-app",
+  "version": "1.0.0",
+  "description": "A Slack bot that integrates with Matt-GPT API using the Bolt JavaScript SDK",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.4.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.0.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18",
+    "npm": ">=8.6.0"
+  },
+  "keywords": [
+    "slack",
+    "bot",
+    "matt-gpt",
+    "claude",
+    "bolt"
+  ],
+  "author": "Matt",
+  "license": "ISC"
+}
