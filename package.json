@@ -11,6 +11,7 @@
     "@slack/bolt": "^4.4.0",
     "axios": "^1.6.0",
     "dotenv": "^16.0.0",
+    "slackify-markdown": "^4.5.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

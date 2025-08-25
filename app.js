@@ -2,6 +2,7 @@ require("dotenv").config();
 const { App } = require("@slack/bolt");
 const axios = require("axios");
 const { v4: uuidv4 } = require('uuid');
+const slackifyMarkdown = require('slackify-markdown');
 
 // Initialize Slack Bolt app with Events API for production deployment
 const app = new App({
@@ -514,10 +515,15 @@ async function processMessageRequest(message, say, client, logger) {
     const responseConversationId = mattGPTResponse.conversation_id || conversationId;
     logger.info(`💾 Using conversation ID: ${responseConversationId} (from ${mattGPTResponse.conversation_id ? 'API response' : 'thread history'})`);
 
+    // Convert markdown to Slack format before creating the response
+    logger.info(`🔄 Converting markdown to Slack format...`);
+    const slackFormattedResponse = slackifyMarkdown(mattGPTResponse.response);
+    logger.info(`✅ Markdown converted to Slack format`);
+    
     // Update thinking message with response, including conversation ID in metadata
     logger.info(`🔄 Updating thinking message with response...`);
     const responsePayload = createMessageWithConversationId(
-      mattGPTResponse.response,
+      slackFormattedResponse,
       responseConversationId,
       thread_ts || ts
     );
