@@ -38,7 +38,7 @@ async function callMattGPTWithRetry(message, context = {}, maxRetries = 3, logge
           Authorization: `Bearer ${MATT_GPT_BEARER_TOKEN}`,
           "Content-Type": "application/json",
         },
-        timeout: 30000, // 30 second timeout for Matt-GPT
+        timeout: 180000, // 180 second (3 minute) timeout for Matt-GPT
       };
 
       // Log the exact request being made
